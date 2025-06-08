@@ -2,6 +2,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from copy import deepcopy
 
 from flask import Flask, request, jsonify
 
@@ -177,3 +178,8 @@ class NodeRegistryServer:
     def set_node_expiry_timeout(self, new_time):
         with self.parameter_lock:
             self.node_expiry_time = new_time
+
+    def get_node_registry(self):
+        with self.node_data_lock:
+            data = deepcopy(self.node_registry)
+        return data
