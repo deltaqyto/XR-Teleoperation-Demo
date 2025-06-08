@@ -1,0 +1,9 @@
+pyrealsense2
+opencv-python
+numpy
+aiortc
+av
+websockets
+matplotlib
+dearpygui
+flask
