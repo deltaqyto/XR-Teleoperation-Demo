@@ -33,7 +33,7 @@ class Node:
 
 
 class NodeRegistryServer:
-    def __init__(self, port=10080, node_expiry_time=1.0, debug=False):
+    def __init__(self, port=10081, node_expiry_time=1.0, debug=False):
         self.port = port
         self.debug = debug
         self.parameter_lock = threading.Lock()
@@ -183,3 +183,8 @@ class NodeRegistryServer:
         with self.node_data_lock:
             data = deepcopy(self.node_registry)
         return data
+
+r = NodeRegistryServer()
+r.start()
+while True:
+    time.sleep(1)
