@@ -56,6 +56,19 @@ class NodeRegistryServer:
                 node_id = self._generate_node_id(requested_name)
                 self.node_registry[node_id] = Node(requested_name, node_id, message_time)
 
+                node = self.node_registry[node_id]
+
+                if 'payload' in data:
+                    node.payload_queue.append(data['payload'])
+                if 'config_schema' in data:
+                    node.config_schema = data['config_schema']
+                    node.change_flags.config_schema = True
+                if 'command_schema' in data:
+                    node.command_schema = data['command_schema']
+                    node.change_flags.command_schema = True
+
+                node.last_message_time = time.time()
+
             return jsonify({'message_type': 'success', 'node_id': node_id})
 
         @self.server.route('/disconnect', methods=["POST"])
