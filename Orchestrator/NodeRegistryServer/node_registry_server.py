@@ -1,36 +1,11 @@
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+
+from typing import Dict
 from copy import deepcopy
 
 from flask import Flask, request, jsonify
-
-
-@dataclass
-class LifeStatus:
-    status: str
-    reason: Optional[str]
-    last_seen: float
-
-
-@dataclass
-class ChangeFlags:
-    config_schema: bool = False
-    command_schema: bool = False
-
-
-class Node:
-    def __init__(self, node_name: str, node_id: str, message_time: float):
-        self.node_name = node_name
-        self.node_id = node_id
-        self.payload_queue: List[Any] = []
-        self.config_schema: Optional[Dict] = None
-        self.command_schema: Optional[Dict] = None
-        self.change_flags = ChangeFlags()
-        self.last_message_time = message_time
-        self.life_status = LifeStatus(status='alive', reason=None, last_seen=message_time)
-
+from Orchestrator.NodeRegistryServer.node_dataclass import Node, LifeStatus, ChangeFlags
 
 class NodeRegistryServer:
     def __init__(self, port=10081, node_expiry_time=1.0, debug=False):
@@ -183,8 +158,3 @@ class NodeRegistryServer:
         with self.node_data_lock:
             data = deepcopy(self.node_registry)
         return data
-
-r = NodeRegistryServer()
-r.start()
-while True:
-    time.sleep(1)
