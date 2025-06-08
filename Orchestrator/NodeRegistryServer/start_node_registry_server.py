@@ -1,7 +1,34 @@
 import threading
 import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 from flask import Flask, request, jsonify
+
+
+@dataclass
+class LifeStatus:
+    status: str
+    reason: Optional[str]
+    last_seen: float
+
+
+@dataclass
+class ChangeFlags:
+    config_schema: bool = False
+    command_schema: bool = False
+
+
+class Node:
+    def __init__(self, node_name: str, node_id: str, message_time: float):
+        self.node_name = node_name
+        self.node_id = node_id
+        self.payload_queue: List[Any] = []
+        self.config_schema: Optional[Dict] = None
+        self.command_schema: Optional[Dict] = None
+        self.change_flags = ChangeFlags()
+        self.last_message_time = message_time
+        self.life_status = LifeStatus(status='alive', reason=None, last_seen=message_time)
 
 
 class NodeRegistryServer:
@@ -12,20 +39,18 @@ class NodeRegistryServer:
         self.node_expiry_time = node_expiry_time
 
         self.node_data_lock = threading.Lock()
-        self.node_registry = {}
-        self.node_name_counters = {}
-        # End node_data_lock variables
+        self.node_registry: Dict[str, Node] = {}
+        self.node_name_counters: Dict[str, int] = {}
 
         self.server = Flask(__name__)
         self._register_endpoints()
 
-    def _generate_node_id(self, requested_name):
+    def _generate_node_id(self, requested_name: str) -> str:
         # Not thread safe. node_name_counters must be locked
 
         # Check for dead nodes with exact name match
-        for node_id, node_data in self.node_registry.items():
-            if (node_data.get('node_name') == requested_name and
-                    node_data.get('life_status', {}).get('status') == 'dead'):
+        for node_id, node in self.node_registry.items():
+            if node.node_name == requested_name and node.life_status.status == 'dead':
                 return node_id
 
         # No dead node found, generate new ID
@@ -34,7 +59,6 @@ class NodeRegistryServer:
 
         self.node_name_counters[requested_name] += 1
         return f"{requested_name}_{self.node_name_counters[requested_name]}"
-
 
     def _register_endpoints(self):
         @self.server.route('/connect', methods=["POST"])
@@ -54,16 +78,9 @@ class NodeRegistryServer:
 
             with self.node_data_lock:
                 node_id = self._generate_node_id(requested_name)
+                self.node_registry[node_id] = Node(requested_name, node_id, message_time)
 
-                self.node_registry[node_id] = {
-                    'node_name': requested_name,
-                    'payload_queue': [],
-                    'config_schema': None,
-                    'command_schema': None,
-                    'change_flags': {'config_schema': False, 'command_schema': False},
-                    'last_message_time': message_time,
-                    'life_status': {'status': 'alive', 'reason': None, 'last_seen': message_time}
-                }
+            return jsonify({'message_type': 'success', 'node_id': node_id})
 
         @self.server.route('/disconnect', methods=["POST"])
         def disconnect_node():
@@ -87,16 +104,16 @@ class NodeRegistryServer:
                     print(data)
                     return jsonify({'message_type': 'error', 'message': 'Unregistered node id. Did you forget to connect?'})
 
-                self.node_registry[node_id]['life_status'] = {'status': 'dead', 'reason': 'disconnected', 'last_seen': message_time}
+                self.node_registry[node_id].life_status = LifeStatus(status='dead', reason='disconnected', last_seen=message_time)
 
         @self.server.route('/data', methods=["POST"])
         def handle_heartbeat():
             data = request.json
 
             errors = []
-            if 'node_id' not in data: errors.append(f"'node_id' not in heartbeat packet")
-            if 'node_name' not in data: errors.append(f"'node_name' not in heartbeat packet")
-            if 'timestamp' not in data: errors.append(f"'timestamp' not in heartbeat packet")
+            if 'node_id' not in data: errors.append("'node_id' not in heartbeat packet")
+            if 'node_name' not in data: errors.append("'node_name' not in heartbeat packet")
+            if 'timestamp' not in data: errors.append("'timestamp' not in heartbeat packet")
             if errors:
                 print("Malformed packet received:")
                 for error in errors:
@@ -112,42 +129,37 @@ class NodeRegistryServer:
                     print("Unregistered node id. Did you forget to connect?")
                     return jsonify({'message_type': 'error', 'message': 'Unregistered node id. Did you forget to connect?'})
 
-                if 'payload' in data:
-                    self.node_registry[node_id]['payload_queue'].append(data['payload'])
-                if 'config_schema' in data:
-                    self.node_registry[node_id]['config_schema'] = data['config_schema']
-                    self.node_registry[node_id]['change_flags']['config_schema'] = True
-                if 'command_schema' in data:
-                    self.node_registry[node_id]['command_schema'] = data['command_schema']
-                    self.node_registry[node_id]['change_flags']['command_schema'] = True
-                self.node_registry[node_id]['last_message_time'] = time.time()
+                node = self.node_registry[node_id]
 
+                if 'payload' in data:
+                    node.payload_queue.append(data['payload'])
+                if 'config_schema' in data:
+                    node.config_schema = data['config_schema']
+                    node.change_flags.config_schema = True
+                if 'command_schema' in data:
+                    node.command_schema = data['command_schema']
+                    node.change_flags.command_schema = True
+
+                node.last_message_time = time.time()
 
     def cleanup_task(self):
         expiry_time = 1
         while True:
-
             with self.parameter_lock:
                 expiry_time = self.node_expiry_time
 
             with self.node_data_lock:
                 now = time.time()
-                for node_id, node_data in self.node_registry.items():
-                    last_message_time = node_data['last_message_time']
-                    if now - last_message_time > expiry_time:
+                for node_id, node in self.node_registry.items():
+                    if now - node.last_message_time > expiry_time:
                         reason = 'timeout'
-                        if node_id not in self.node_registry:
-                            print("Unregistered node id. Did you forget to connect?")
-                            return
-                        new_reason = self.node_registry[node_id]['life_status'].get('reason', reason)
-                        if new_reason is not None:
-                            reason = new_reason
-                        self.node_registry[node_id]['life_status'] = {'status': 'dead', 'reason': reason, 'last_seen': last_message_time}
+                        current_reason = node.life_status.reason
+                        if current_reason is not None:
+                            reason = current_reason
+                        node.life_status = LifeStatus(status='dead', reason=reason, last_seen=node.last_message_time)
                     else:
-                        if node_id not in self.node_registry:
-                            print("Unregistered node id. Did you forget to connect?")
-                            return
-                        self.node_registry[node_id]['life_status']  = {'status': 'alive', 'reason': None, 'last_seen': last_message_time}
+                        node.life_status = LifeStatus(status='alive', reason=None, last_seen=node.last_message_time)
+
             time.sleep(expiry_time * 1.1)
 
     def start(self):
@@ -158,7 +170,7 @@ class NodeRegistryServer:
         server_thread = threading.Thread(target=lambda: self.server.run(host='localhost', port=self.port, debug=self.debug))
         server_thread.daemon = True
         server_thread.start()
-        
+
         print(f"Node Registry Server started on localhost:{self.port}")
         return server_thread
 
