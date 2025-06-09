@@ -5,7 +5,7 @@ from typing import Dict
 from copy import deepcopy
 
 from flask import Flask, request, jsonify
-from Orchestrator.NodeRegistryServer.node_dataclass import Node, LifeStatus, ChangeFlags
+from NodeRegistryServer.node_dataclass import Node, LifeStatus, ChangeFlags
 
 class NodeRegistryServer:
     def __init__(self, port=10081, node_expiry_time=1.0, debug=False):
