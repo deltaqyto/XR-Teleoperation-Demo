@@ -17,9 +17,12 @@ class NodeRegistryServer:
         self.node_data_lock = threading.Lock()
         self.node_registry: Dict[str, Node] = {}
         self.node_name_counters: Dict[str, int] = {}
+        self.node_outbound_cache: Dict[str, tuple] = {}
 
         self.server = Flask(__name__)
         self._register_endpoints()
+
+        self.start()
 
     def _generate_node_id(self, requested_name: str) -> str:
         # Not thread safe. node_name_counters must be locked
@@ -67,8 +70,6 @@ class NodeRegistryServer:
                     node.command_schema = data['command_schema']
                     node.change_flags.command_schema = True
 
-                node.last_message_time = time.time()
-
             return jsonify({'message_type': 'success', 'node_id': node_id})
 
         @self.server.route('/disconnect', methods=["POST"])
@@ -92,7 +93,7 @@ class NodeRegistryServer:
                     print('Packet:')
                     print(data)
                     return jsonify({'message_type': 'error', 'message': 'Unregistered node id. Did you forget to connect?'})
-
+                self.node_registry[node_id].change_flags.status_update = True
                 self.node_registry[node_id].life_status = LifeStatus(status='dead', reason='disconnected', last_seen=message_time)
 
         @self.server.route('/data', methods=["POST"])
@@ -131,6 +132,10 @@ class NodeRegistryServer:
 
                 node.last_message_time = time.time()
 
+                if node_id in self.node_outbound_cache:
+                    return jsonify({'message_type': 'heartbeat_response', 'node_id': node_id, 'config_update': self.node_outbound_cache[node_id][0], 'actions': self.node_outbound_cache[node_id][1]})
+                return jsonify({'message_type': 'heartbeat_response', 'node_id': node_id})
+
     def cleanup_task(self):
         expiry_time = 1
         while True:
@@ -141,12 +146,16 @@ class NodeRegistryServer:
                 now = time.time()
                 for node_id, node in self.node_registry.items():
                     if now - node.last_message_time > expiry_time:
+                        if node.life_status.status != 'dead':
+                            node.change_flags.status_update = True
                         reason = 'timeout'
                         current_reason = node.life_status.reason
                         if current_reason is not None:
                             reason = current_reason
                         node.life_status = LifeStatus(status='dead', reason=reason, last_seen=node.last_message_time)
                     else:
+                        if node.life_status.status != 'alive':
+                            node.change_flags.status_update = True
                         node.life_status = LifeStatus(status='alive', reason=None, last_seen=node.last_message_time)
 
             time.sleep(expiry_time * 1.1)
@@ -171,3 +180,10 @@ class NodeRegistryServer:
         with self.node_data_lock:
             data = deepcopy(self.node_registry)
         return data
+
+    def add_outbound_messages(self, node_id, config=None, actions=None):
+        with self.node_data_lock:
+            if node_id not in self.node_outbound_cache:
+                self.node_outbound_cache[node_id] = ([], [])
+            self.node_outbound_cache[node_id][0] += config or []
+            self.node_outbound_cache[node_id][1] += actions or []
