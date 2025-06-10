@@ -1,4 +1,5 @@
 import time
+from re import fullmatch
 
 import dearpygui.dearpygui as dpg
 from copy import deepcopy
@@ -20,6 +21,9 @@ class NodeSettingsWindow:
         # Widget tracking for value retrieval
         self.config_widgets = []
         self.action_widget_map = {}
+
+        self.config_validation_errors = {}
+        self.action_validation_errors = {}
 
         # Internal widget mapping
         self.widget_map = {
@@ -48,6 +52,15 @@ class NodeSettingsWindow:
             "colour": dpg.add_color_picker,
         }
 
+        self.config_button = None
+        self.action_buttons = {}
+
+        with dpg.theme() as self.error_button_theme:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (180, 50, 50))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (220, 70, 70))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (140, 30, 30))
+
         self.rebuild_window()
 
     def set_config_schema(self, new_schema):
@@ -72,6 +85,7 @@ class NodeSettingsWindow:
     def rebuild_window(self):
         self.action_widget_map = {}
         self.config_widgets = []
+        self.action_buttons = {}
         with dpg.window(label=self.node_title) as self.window_tag:
             indent_level = 0
             parent_tags = [self.window_tag]
@@ -80,7 +94,7 @@ class NodeSettingsWindow:
                 indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*action_data, parent_tags, indent_level)
                 if is_configurable:
                     self.config_widgets.append(widget_tag)
-            dpg.add_button(label="Apply Configuration", callback=self._config_callback)
+            self.config_button = dpg.add_button(label="Apply Configuration", callback=self._config_callback)
             dpg.add_separator(label='Actions', parent=self.window_tag)
             for action_name, action_data in self.actions_schema.items():
                 indent_level = 0
@@ -89,22 +103,28 @@ class NodeSettingsWindow:
                 with dpg.collapsing_header(label=action_name, parent=self.window_tag, default_open=options.get('default_open', False)) as header:
                     parent_tags = [self.window_tag, header]
                     if type(widgets) is str:
-                        dpg.add_button(label=widgets, user_data=action_name, callback=self._action_callback)
+                        self.action_buttons[action_name] = (dpg.add_button(label=widgets, user_data=action_name, callback=self._action_callback), widgets)
                         self.action_widget_map[action_name] = []
                         continue
                     for widget in widgets:
                         if type(widget) is str:
-                            dpg.add_button(label=widget, user_data=action_name, callback=self._action_callback)
+                            self.action_buttons[action_name] = (dpg.add_button(label=widget, user_data=action_name, callback=self._action_callback), widget)
                             self.action_widget_map[action_name] = action_widgets
                             break
                         else:
-                            indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*widget, parent_tags, indent_level)
+                            indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*widget, parent_tags, indent_level, action_name=action_name)
                             if is_configurable:
                                 action_widgets.append(widget_tag)
 
-    def spawn_widget(self, widget_type, label, options, default_value, parents, indent_level):
+    def spawn_widget(self, widget_type, label, options, default_value, parents, indent_level, action_name=None):
         widget_kwargs = {'label': label, 'parent': parents[-1], 'indent': indent_level}
         widget_adder = self.widget_map[widget_type]
+
+        validation_data = {
+            'widget_type': widget_type,
+            'action_name': action_name,
+        }
+
         match widget_type:
             case 'separator':
                 pass
@@ -229,6 +249,11 @@ class NodeSettingsWindow:
                 widget_kwargs['decimal'] = options.get('decimal', False)
                 widget_kwargs['hexadecimal'] = options.get('hexadecimal', False)
                 widget_kwargs['scientific'] = options.get('scientific', False)
+
+                validation_data['regex'] = options.get('regex')
+                validation_data['max_length'] = options.get('max_length')
+                widget_kwargs['callback'] = self._validation_callback
+                widget_kwargs['user_data'] = validation_data
             case 'knob':
                 widget_kwargs['default_value'] = default_value
                 widget_kwargs['min_value'] = options.get('min', 0)
@@ -250,9 +275,18 @@ class NodeSettingsWindow:
                 widget_kwargs['default_value'] = default_value
                 widget_kwargs['min_value'] = options.get('min', None)
                 widget_kwargs['max_value'] = options.get('max', None)
+
+                validation_data['min'] = options.get('min')
+                validation_data['max'] = options.get('max')
+                validation_data['blacklist'] = options.get('blacklist')
+                widget_kwargs['callback'] = self._validation_callback
+                widget_kwargs['user_data'] = validation_data
             case 'ip_address':
                 widget_kwargs['size'] = 4
                 widget_kwargs['default_value'] = default_value
+
+                widget_kwargs['callback'] = self._validation_callback
+                widget_kwargs['user_data'] = validation_data
                 
             case 'colour':
                 widget_kwargs['default_value'] = default_value
@@ -272,15 +306,61 @@ class NodeSettingsWindow:
         return indent_level, widget_adder(**widget_kwargs), parents, is_configurable
 
     def _config_callback(self, sender, app_data, user_data):
+        if any(len(errors) > 0 for errors in self.config_validation_errors.values()):
+            return
+
+        dpg.configure_item(sender, label="Apply Configuration")
+        dpg.bind_item_theme(sender, 0)
         output_data = dpg.get_values(self.config_widgets)
         self.current_config_cache = output_data
         self.config_has_changed = True
 
     def _action_callback(self, sender, app_data, user_data):
+        action_errors = self.action_validation_errors.get(user_data, {})
+        if any(len(errors) > 0 for errors in action_errors.values()):
+            return
         output_data = dpg.get_values(self.action_widget_map[user_data])
         self.action_cache.append((user_data, output_data))
 
-    # TODO Function to process the inputs (eg validation)
+    def _validation_callback(self, sender, app_data, user_data):
+        invalid = []
+        match user_data['widget_type']:
+            case 'string':
+                if user_data.get('max_length') is not None and len(app_data) > user_data['max_length']:
+                    invalid.append(f"String is longer than allowed length {user_data['max_length']}")
+                if not fullmatch(user_data.get('regex', '.*'), app_data):
+                    invalid.append(f"String does not meet format regex {user_data.get('regex', '.*')}")
+            case 'port':
+                if user_data.get('blacklist') is not None and app_data in user_data.get('blacklist', []):
+                    invalid.append(f"Port {app_data} is in blacklisted ports")
+                if not user_data.get('min', 0) <= app_data <= user_data.get('max', 65535):
+                    invalid.append(f"Port {app_data} is out of allowed range ({user_data.get('min', 0)}, {user_data.get('max', 65535)})")
+            case 'ip_address':
+                for i, value in enumerate(app_data):
+                    if not 0 <= value <= 255:
+                        invalid.append(f"Field {i+1} of ip address is out of range ({value})")
+
+        if user_data['action_name'] is None:
+            self.config_validation_errors[sender] = invalid
+            if any(v for v in self.config_validation_errors.values()):
+                dpg.configure_item(self.config_button, label="Fix Errors First")
+                dpg.bind_item_theme(self.config_button, self.error_button_theme)
+            else:
+                dpg.configure_item(self.config_button, label="Apply Configuration")
+                dpg.bind_item_theme(self.config_button, 0)
+        else:
+            if user_data['action_name'] not in self.action_validation_errors:
+                self.action_validation_errors[user_data['action_name']] = {}
+
+            self.action_validation_errors[user_data['action_name']][sender] = invalid
+
+            if any([v for v in self.action_validation_errors[user_data['action_name']].values()]):
+                dpg.configure_item(self.action_buttons[user_data['action_name']][0], label="Fix Errors First")
+                dpg.bind_item_theme(self.action_buttons[user_data['action_name']][0], self.error_button_theme)
+            else:
+                dpg.configure_item(self.action_buttons[user_data['action_name']][0], label=self.action_buttons[user_data['action_name']][1])
+                dpg.bind_item_theme(self.action_buttons[user_data['action_name']][0], 0)
+
     # TODO Allow maintaining past values in regenerated fields
 
 if __name__ == "__main__":
@@ -388,7 +468,7 @@ if __name__ == "__main__":
 
         "network_diagnostics": [{"default_open": False}, [
             ("radio", "Test Type", {"items": ["ping", "traceroute", "bandwidth", "latency"]}, "ping"),
-            ("string", "Target Host", {}, "8.8.8.8"),
+            ("ip_address", "Target Host", {}, [8,8,8,8]),
             ("int", "Packet Count", {"min": 1, "max": 1000}, 10),
             ("float", "Timeout (s)", {"min": 0.1, "max": 30.0}, 5.0),
             ("bool", "Continuous Mode", {}, False),
