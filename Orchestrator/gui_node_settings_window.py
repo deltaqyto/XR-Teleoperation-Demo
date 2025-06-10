@@ -54,6 +54,7 @@ class NodeSettingsWindow:
 
         self.config_button = None
         self.action_buttons = {}
+        self.window_tag = dpg.add_window(label=self.node_title)
 
         with dpg.theme() as self.error_button_theme:
             with dpg.theme_component(dpg.mvButton):
@@ -86,35 +87,36 @@ class NodeSettingsWindow:
         self.action_widget_map = {}
         self.config_widgets = []
         self.action_buttons = {}
-        with dpg.window(label=self.node_title) as self.window_tag:
+        dpg.delete_item(self.window_tag, children_only=True)
+
+        indent_level = 0
+        parent_tags = [self.window_tag]
+        dpg.add_separator(label='Configuration', parent=self.window_tag)
+        for action_data in self.config_schema:
+            indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*action_data, parent_tags, indent_level)
+            if is_configurable:
+                self.config_widgets.append(widget_tag)
+        self.config_button = dpg.add_button(label="Apply Configuration", callback=self._config_callback, parent=self.window_tag)
+        dpg.add_separator(label='Actions', parent=self.window_tag)
+        for action_name, action_data in self.actions_schema.items():
             indent_level = 0
-            parent_tags = [self.window_tag]
-            dpg.add_separator(label='Configuration', parent=self.window_tag)
-            for action_data in self.config_schema:
-                indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*action_data, parent_tags, indent_level)
-                if is_configurable:
-                    self.config_widgets.append(widget_tag)
-            self.config_button = dpg.add_button(label="Apply Configuration", callback=self._config_callback)
-            dpg.add_separator(label='Actions', parent=self.window_tag)
-            for action_name, action_data in self.actions_schema.items():
-                indent_level = 0
-                options, widgets = action_data
-                action_widgets = []
-                with dpg.collapsing_header(label=action_name, parent=self.window_tag, default_open=options.get('default_open', False)) as header:
-                    parent_tags = [self.window_tag, header]
-                    if type(widgets) is str:
-                        self.action_buttons[action_name] = (dpg.add_button(label=widgets, user_data=action_name, callback=self._action_callback), widgets)
-                        self.action_widget_map[action_name] = []
-                        continue
-                    for widget in widgets:
-                        if type(widget) is str:
-                            self.action_buttons[action_name] = (dpg.add_button(label=widget, user_data=action_name, callback=self._action_callback), widget)
-                            self.action_widget_map[action_name] = action_widgets
-                            break
-                        else:
-                            indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*widget, parent_tags, indent_level, action_name=action_name)
-                            if is_configurable:
-                                action_widgets.append(widget_tag)
+            options, widgets = action_data
+            action_widgets = []
+            with dpg.collapsing_header(label=action_name, parent=self.window_tag, default_open=options.get('default_open', False)) as header:
+                parent_tags = [self.window_tag, header]
+                if type(widgets) is str:
+                    self.action_buttons[action_name] = (dpg.add_button(label=widgets, user_data=action_name, callback=self._action_callback, parent=self.window_tag), widgets)
+                    self.action_widget_map[action_name] = []
+                    continue
+                for widget in widgets:
+                    if type(widget) is str:
+                        self.action_buttons[action_name] = (dpg.add_button(label=widget, user_data=action_name, callback=self._action_callback, parent=self.window_tag), widget)
+                        self.action_widget_map[action_name] = action_widgets
+                        break
+                    else:
+                        indent_level, widget_tag, parent_tags, is_configurable = self.spawn_widget(*widget, parent_tags, indent_level, action_name=action_name)
+                        if is_configurable:
+                            action_widgets.append(widget_tag)
 
     def spawn_widget(self, widget_type, label, options, default_value, parents, indent_level, action_name=None):
         widget_kwargs = {'label': label, 'parent': parents[-1], 'indent': indent_level}
@@ -360,6 +362,12 @@ class NodeSettingsWindow:
             else:
                 dpg.configure_item(self.action_buttons[user_data['action_name']][0], label=self.action_buttons[user_data['action_name']][1])
                 dpg.bind_item_theme(self.action_buttons[user_data['action_name']][0], 0)
+
+    def set_visibility(self, visible):
+        if visible:
+            dpg.show_item(self.window_tag)
+            return
+        dpg.hide_item(self.window_tag)
 
     # TODO Allow maintaining past values in regenerated fields
 

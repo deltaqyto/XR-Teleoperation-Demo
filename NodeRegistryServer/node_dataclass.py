@@ -12,6 +12,9 @@ class LifeStatus:
 class ChangeFlags:
     config_schema: bool = False
     command_schema: bool = False
+    new_node: bool = False
+    status_update: bool = False
+
 
 
 class Node:
@@ -21,6 +24,6 @@ class Node:
         self.payload_queue: List[Any] = []
         self.config_schema: Optional[Dict] = None
         self.command_schema: Optional[Dict] = None
-        self.change_flags = ChangeFlags()
+        self.change_flags = ChangeFlags(new_node=True, status_update=True)
         self.last_message_time = message_time
         self.life_status = LifeStatus(status='alive', reason=None, last_seen=message_time)

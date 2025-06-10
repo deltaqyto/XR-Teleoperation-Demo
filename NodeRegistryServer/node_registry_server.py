@@ -17,7 +17,8 @@ class NodeRegistryServer:
         self.node_data_lock = threading.Lock()
         self.node_registry: Dict[str, Node] = {}
         self.node_name_counters: Dict[str, int] = {}
-        self.node_outbound_cache: Dict[str, tuple] = {}
+        self.node_outbound_cache: Dict[str, list] = {}
+        self.remote_data = None
 
         self.server = Flask(__name__)
         self._register_endpoints()
@@ -70,7 +71,11 @@ class NodeRegistryServer:
                     node.command_schema = data['command_schema']
                     node.change_flags.command_schema = True
 
-            return jsonify({'message_type': 'success', 'node_id': node_id})
+                out = {'message_type': 'success', 'node_id': node_id}
+                if self.remote_data is not None:
+                    out['remote_ports'] = self.remote_data
+
+                return jsonify(out)
 
         @self.server.route('/disconnect', methods=["POST"])
         def disconnect_node():
@@ -95,6 +100,7 @@ class NodeRegistryServer:
                     return jsonify({'message_type': 'error', 'message': 'Unregistered node id. Did you forget to connect?'})
                 self.node_registry[node_id].change_flags.status_update = True
                 self.node_registry[node_id].life_status = LifeStatus(status='dead', reason='disconnected', last_seen=message_time)
+            return jsonify({'message_type': 'success'})
 
         @self.server.route('/data', methods=["POST"])
         def handle_heartbeat():
@@ -131,10 +137,15 @@ class NodeRegistryServer:
                     node.change_flags.command_schema = True
 
                 node.last_message_time = time.time()
+                out = {'message_type': 'heartbeat_response', 'node_id': node_id}
+                if self.remote_data is not None:
+                    out['remote_ports'] = self.remote_data
 
                 if node_id in self.node_outbound_cache:
-                    return jsonify({'message_type': 'heartbeat_response', 'node_id': node_id, 'config_update': self.node_outbound_cache[node_id][0], 'actions': self.node_outbound_cache[node_id][1]})
-                return jsonify({'message_type': 'heartbeat_response', 'node_id': node_id})
+                    out = jsonify({**out, **{'config_update': self.node_outbound_cache[node_id][0], 'actions': self.node_outbound_cache[node_id][1]}})
+                    self.node_outbound_cache[node_id] = [[], []]
+                    return out
+                return jsonify(out)
 
     def cleanup_task(self):
         expiry_time = 1
@@ -157,7 +168,6 @@ class NodeRegistryServer:
                         if node.life_status.status != 'alive':
                             node.change_flags.status_update = True
                         node.life_status = LifeStatus(status='alive', reason=None, last_seen=node.last_message_time)
-
             time.sleep(expiry_time * 1.1)
 
     def start(self):
@@ -179,11 +189,21 @@ class NodeRegistryServer:
     def get_node_registry(self):
         with self.node_data_lock:
             data = deepcopy(self.node_registry)
+            for node in self.node_registry.values():
+                node.change_flags.config_schema = False
+                node.change_flags.command_schema = False
+                node.change_flags.new_node = False
+                node.change_flags.status_update = False
+                node.payload_queue = []
         return data
 
     def add_outbound_messages(self, node_id, config=None, actions=None):
         with self.node_data_lock:
             if node_id not in self.node_outbound_cache:
-                self.node_outbound_cache[node_id] = ([], [])
+                self.node_outbound_cache[node_id] = [[], []]
             self.node_outbound_cache[node_id][0] += config or []
             self.node_outbound_cache[node_id][1] += actions or []
+
+    def update_remote_data(self, remote_data):
+        with self.node_data_lock:
+            self.remote_data = remote_data
