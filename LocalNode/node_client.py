@@ -98,7 +98,6 @@ class NodeClient:
         """Get any configuration changes. Returns list of config updates."""
         with self._cache_lock:
             changes = self.config_changes_list.copy()
-            self.config_changes_list.clear()
         return changes
 
     def get_remote_discovery(self):
@@ -188,9 +187,10 @@ class NodeClient:
                     with self._cache_lock:
                         self.remote_discovery_cache.update(data['remote_ports'])
 
-                # Handle config updates (if implemented by server)
+                # Handle config updates
                 if 'config_update' in data and data['config_update']:
                     with self._cache_lock:
+                        self.config_changes_list = []
                         for config_item in data['config_update']:
                             self.config_changes_list.append(config_item)
 

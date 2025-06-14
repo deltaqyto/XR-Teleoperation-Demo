@@ -16,7 +16,6 @@ class NodeSettingsWindow:
         # Caches for outbound commands
         self.action_cache = []
         self.current_config_cache = []
-        self.config_has_changed = True
 
         # Widget tracking for value retrieval
         self.config_widgets = []
@@ -72,10 +71,7 @@ class NodeSettingsWindow:
         self.actions_schema = new_schema
         self.rebuild_window()
 
-    def get_current_settings(self, force=False):
-        if not self.config_has_changed and not force:
-            return []
-        self.config_has_changed = False
+    def get_current_settings(self):
         return deepcopy(self.current_config_cache)
 
     def get_queued_actions(self):
@@ -315,7 +311,6 @@ class NodeSettingsWindow:
         dpg.bind_item_theme(sender, 0)
         output_data = dpg.get_values(self.config_widgets)
         self.current_config_cache = output_data
-        self.config_has_changed = True
 
     def _action_callback(self, sender, app_data, user_data):
         action_errors = self.action_validation_errors.get(user_data, {})

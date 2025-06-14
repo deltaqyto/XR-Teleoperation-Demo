@@ -143,7 +143,7 @@ class NodeRegistryServer:
 
                 if node_id in self.node_outbound_cache:
                     out = jsonify({**out, **{'config_update': self.node_outbound_cache[node_id][0], 'actions': self.node_outbound_cache[node_id][1]}})
-                    self.node_outbound_cache[node_id] = [[], []]
+                    self.node_outbound_cache[node_id] = [self.node_outbound_cache[node_id][0], []]
                     return out
                 return jsonify(out)
 
@@ -201,7 +201,7 @@ class NodeRegistryServer:
         with self.node_data_lock:
             if node_id not in self.node_outbound_cache:
                 self.node_outbound_cache[node_id] = [[], []]
-            self.node_outbound_cache[node_id][0] += config or []
+            self.node_outbound_cache[node_id][0] = config or self.node_outbound_cache[node_id][0]
             self.node_outbound_cache[node_id][1] += actions or []
 
     def update_remote_data(self, remote_data):
