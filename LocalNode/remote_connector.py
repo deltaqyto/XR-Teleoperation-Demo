@@ -122,3 +122,56 @@ class JSONRemoteConnector:
                 print(f"Worker error: {e}")
                 self.connected = False
                 break
+
+
+class RTCRemoteConnector:
+    def __init__(self, host: str, port: int):
+        self.host = host
+        self.port = port
+        self.pc = None
+        self.websocket = None
+        self.connected = False
+
+    async def connect(self) -> bool:
+        """Establish WebRTC connection"""
+        try:
+            uri = f"ws://{self.host}:{self.port}"
+            self.websocket = await websockets.connect(uri)
+            self.pc = RTCPeerConnection()
+
+            # Create offer and negotiate
+            offer = await self.pc.createOffer()
+            await self.pc.setLocalDescription(offer)
+
+            await self.websocket.send(json.dumps({
+                "type": "offer",
+                "sdp": self.pc.localDescription.sdp
+            }))
+
+            # Wait for answer
+            async for message in self.websocket:
+                data = json.loads(message)
+                if data["type"] == "answer":
+                    await self.pc.setRemoteDescription(RTCSessionDescription(
+                        sdp=data["sdp"], type=data["type"]))
+                    self.connected = True
+                    return True
+
+        except Exception as e:
+            print(f"RTC connection failed: {e}")
+            return False
+
+    def get_peer_connection(self) -> RTCPeerConnection:
+        """Get the RTCPeerConnection for adding tracks"""
+        return self.pc
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+    async def disconnect(self):
+        """Close RTC connection"""
+        self.connected = False
+        if self.pc:
+            await self.pc.close()
+        if self.websocket:
+            await self.websocket.close()
