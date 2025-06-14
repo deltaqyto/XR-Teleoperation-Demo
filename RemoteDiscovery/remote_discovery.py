@@ -30,7 +30,6 @@ class RemoteDiscovery:
                 try:
                     data, addr = sock.recvfrom(1024)
                     announcement = json.loads(data.decode())
-
                     if announcement.get("service") == self.service_name:
                         service_ip = announcement["ip"]
                         service_ports = announcement["ports"]
@@ -49,7 +48,7 @@ class RemoteDiscovery:
                     continue
                 except Exception as e:
                     if self.running:
-                        print(f"Discovery error: {e}")
+                        print(f"Discovery error: {e}\nData: {data}")
 
     def start_discovery(self, service_name=None):
         if service_name:
