@@ -2,6 +2,7 @@ import json
 import socket
 import threading
 import queue
+import asyncio
 from aiortc import RTCPeerConnection, RTCSessionDescription
 import websockets
 
@@ -125,14 +126,62 @@ class JSONRemoteConnector:
 
 
 class RTCRemoteConnector:
-    def __init__(self, host: str, port: int):
+    def __init__(self, host: str = None, port: int = None):
         self.host = host
         self.port = port
         self.pc = None
         self.websocket = None
         self.connected = False
+        self.connection_thread = None
+        self.running = False
 
-    async def connect(self) -> bool:
+    def connect(self) -> bool:
+        """Start WebRTC connection (non-blocking)"""
+        if self.host is None or self.port is None:
+            raise ValueError(f"Tried to connect when host or port are none (host={self.host}, port={self.port})")
+
+        if self.connection_thread and self.connection_thread.is_alive():
+            return False
+
+        self.running = True
+        self.connection_thread = threading.Thread(target=self._connection_worker)
+        self.connection_thread.start()
+        return True
+
+    def disconnect(self):
+        """Close RTC connection (non-blocking)"""
+        self.running = False
+        self.connected = False
+
+        if self.connection_thread and self.connection_thread.is_alive():
+            # Start disconnect in background
+            threading.Thread(target=self._disconnect_worker).start()
+
+    def reconnect(self, host: str = None, port: int = None) -> bool:
+        """Connect to new host/port"""
+        self.disconnect()
+        if host is not None:
+            self.host = host
+        if port is not None:
+            self.port = port
+        return self.connect()
+
+    def _connection_worker(self):
+        """Background thread for WebRTC connection"""
+        try:
+            asyncio.run(self._async_connect())
+        except Exception as e:
+            print(f"RTC connection failed: {e}")
+            self.connected = False
+
+    def _disconnect_worker(self):
+        """Background thread for WebRTC disconnect"""
+        try:
+            asyncio.run(self._async_disconnect())
+        except Exception as e:
+            print(f"RTC disconnect error: {e}")
+
+    async def _async_connect(self) -> bool:
         """Establish WebRTC connection"""
         try:
             uri = f"ws://{self.host}:{self.port}"
@@ -161,17 +210,17 @@ class RTCRemoteConnector:
             print(f"RTC connection failed: {e}")
             return False
 
-    def get_peer_connection(self) -> RTCPeerConnection:
-        """Get the RTCPeerConnection for adding tracks"""
-        return self.pc
-
-    def is_connected(self) -> bool:
-        return self.connected
-
-    async def disconnect(self):
+    async def _async_disconnect(self):
         """Close RTC connection"""
         self.connected = False
         if self.pc:
             await self.pc.close()
         if self.websocket:
             await self.websocket.close()
+
+    def get_peer_connection(self) -> RTCPeerConnection:
+        """Get the RTCPeerConnection for adding tracks"""
+        return self.pc
+
+    def is_connected(self) -> bool:
+        return self.connected
