@@ -1,7 +1,7 @@
 import threading
 import time
 from LocalNode.node_client import NodeClient
-from LocalNode.remote_connector import JSONRemoteConnector, RTCRemoteConnector
+from LocalNode.remote_connector import JSONRemoteConnector
 
 
 class LocalCommsNode:
