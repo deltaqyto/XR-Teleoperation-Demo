@@ -57,6 +57,9 @@ class LocalCommsNode:
         """Returns bools (connected to ui, connected to quest)"""
         return self.node_client.is_connected(), self.remote_client.is_connected()
 
+    def get_remote_discovery_data(self):
+        return self.node_client.get_remote_discovery()
+
     def _upkeep_thread(self):
         while self._upkeep_running:
             try:
