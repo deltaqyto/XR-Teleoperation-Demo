@@ -7,12 +7,13 @@ import numpy as np
 
 
 class UDPRemoteConnector:
-    def __init__(self, chunk_size=1200, jpeg_quality=85, silent=False, log_interval=5.0, intrinsics_interval=2.0):
+    def __init__(self, chunk_size=1200, jpeg_quality=85, silent=False, log_interval=5.0, intrinsics_interval=2.0, localhost_port=None):
         self.chunk_size = chunk_size
         self.jpeg_quality = jpeg_quality
         self.silent = silent
         self.log_interval = log_interval
         self.intrinsics_interval = intrinsics_interval
+        self.localhost_port = localhost_port  # Optional local port
 
         # Connection state
         self.remote_ip = None
@@ -70,7 +71,10 @@ class UDPRemoteConnector:
                 self._connected = True
 
                 if not self.silent:
-                    print(f"UDP connector ready for {remote_ip}:{remote_port}")
+                    destinations = f"{remote_ip}:{remote_port}"
+                    if self.localhost_port:
+                        destinations += f" + localhost:{self.localhost_port}"
+                    print(f"UDP connector ready for {destinations}")
                 return True
 
             except Exception as e:
@@ -212,6 +216,21 @@ class UDPRemoteConnector:
             if not self.silent:
                 print(f"Error processing depth frame: {e}")
 
+    def _send_packet_to_destinations(self, packet):
+        """Send packet to both remote destination and localhost (if configured)"""
+        try:
+            with self._socket_lock:
+                if self.socket and self._connected:
+                    # Send to remote destination
+                    self.socket.sendto(packet, (self.remote_ip, self.remote_port))
+
+                    # Also send to localhost if configured
+                    if self.localhost_port:
+                        self.socket.sendto(packet, ("127.0.0.1", self.localhost_port))
+        except Exception as e:
+            if not self.silent:
+                print(f"UDP send failed: {e}")
+
     def _send_fragmented_pointcloud(self, pointcloud_data, frame_id, point_count):
         """Fragment point cloud data and send via UDP"""
         if not self.is_connected():
@@ -234,14 +253,7 @@ class UDPRemoteConnector:
                                  point_count)
 
             packet = header + payload
-
-            try:
-                with self._socket_lock:
-                    if self.socket and self._connected:
-                        self.socket.sendto(packet, (self.remote_ip, self.remote_port))
-            except Exception as e:
-                if not self.silent:
-                    print(f"UDP send failed: {e}")
+            self._send_packet_to_destinations(packet)
 
     def _maybe_send_intrinsics(self):
         """Send intrinsics periodically"""
@@ -276,9 +288,7 @@ class UDPRemoteConnector:
             header = struct.pack('>I', self.MAGIC_INTRINSICS)
             intrinsics_packet = header + rgb_data + depth_data + extr_data
 
-            with self._socket_lock:
-                if self.socket and self._connected:
-                    self.socket.sendto(intrinsics_packet, (self.remote_ip, self.remote_port))
+            self._send_packet_to_destinations(intrinsics_packet)
 
         except Exception as e:
             if not self.silent:
@@ -305,14 +315,7 @@ class UDPRemoteConnector:
                                  total_fragments)
 
             packet = header + payload
-
-            try:
-                with self._socket_lock:
-                    if self.socket and self._connected:
-                        self.socket.sendto(packet, (self.remote_ip, self.remote_port))
-            except Exception as e:
-                if not self.silent:
-                    print(f"UDP send failed: {e}")
+            self._send_packet_to_destinations(packet)
 
     def _maybe_log_stats(self):
         """Log performance stats periodically"""

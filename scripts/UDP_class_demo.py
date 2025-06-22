@@ -159,7 +159,8 @@ def main():
         chunk_size=1200,
         jpeg_quality=85,
         log_interval=5.0,
-        intrinsics_interval=2.0
+        intrinsics_interval=2.0,
+        localhost_port=9090
     )
 
     # Initialise RealSense pipeline
@@ -173,6 +174,7 @@ def main():
 
     pipeline.start(config)
     print("RealSense camera started")
+    print("UDP streaming configured: Remote device + localhost:9001 for Unity Play Mode")
 
     # Get depth scale
     profile = pipeline.get_active_profile()

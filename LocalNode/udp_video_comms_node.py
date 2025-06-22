@@ -9,7 +9,7 @@ class UDPVideoCommsNode:
                  config_schema=None, action_schema=None, verbose=False,
                  silent=False, upkeep_interval=1.0, disconnect_on_empty=True,
                  frame_slots=16, chunk_size=1200, jpeg_quality=85, log_interval=5.0,
-                 intrinsics_interval=2.0):
+                 intrinsics_interval=2.0, localhost_port=None):
 
         self.node_registry_port = node_registry_port
         self.service_port = service_port
@@ -44,7 +44,8 @@ class UDPVideoCommsNode:
             jpeg_quality=jpeg_quality,
             silent=silent,
             log_interval=log_interval,
-            intrinsics_interval=intrinsics_interval
+            intrinsics_interval=intrinsics_interval,
+            localhost_port=localhost_port
         )
 
         # Start upkeep thread (critical for heartbeat)
