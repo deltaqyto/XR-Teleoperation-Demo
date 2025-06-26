@@ -31,6 +31,7 @@ class RemoteDiscovery:
                     data, addr = sock.recvfrom(1024)
                     announcement = json.loads(data.decode())
                     if announcement.get("service") == self.service_name:
+                        print(announcement)
                         service_ip = announcement["ip"]
                         service_ports = announcement["ports"]
 
