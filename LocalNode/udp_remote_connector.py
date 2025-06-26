@@ -7,13 +7,14 @@ import numpy as np
 
 
 class UDPRemoteConnector:
-    def __init__(self, chunk_size=1200, jpeg_quality=85, silent=False, log_interval=5.0, intrinsics_interval=2.0, localhost_port=None):
+    def __init__(self, chunk_size=1200, jpeg_quality=85, silent=False, log_interval=5.0, intrinsics_interval=2.0, localhost_port=None, extra_send_locations=None):
         self.chunk_size = chunk_size
         self.jpeg_quality = jpeg_quality
         self.silent = silent
         self.log_interval = log_interval
         self.intrinsics_interval = intrinsics_interval
         self.localhost_port = localhost_port  # Optional local port
+        self.extra_send_locations = extra_send_locations or []
 
         # Connection state
         self.remote_ip = None
@@ -227,6 +228,8 @@ class UDPRemoteConnector:
                     # Also send to localhost if configured
                     if self.localhost_port:
                         self.socket.sendto(packet, ("127.0.0.1", self.localhost_port))
+                    for ip, port in self.extra_send_locations:
+                        self.socket.sendto(packet, (ip, port))
         except Exception as e:
             if not self.silent:
                 print(f"UDP send failed: {e}")

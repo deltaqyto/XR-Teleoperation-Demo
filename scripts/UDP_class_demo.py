@@ -97,7 +97,7 @@ def depth_to_pointcloud(depth_frame, color_frame, depth_scale, depth_intrinsics,
         g_color[in_bounds] = color_image[v[in_bounds], u[in_bounds], 1]
         b_color[in_bounds] = color_image[v[in_bounds], u[in_bounds], 2]
 
-    # Detect pixels needing gradient (out of bounds OR genuinely black)
+    # Detect pixels needing gradient (out of bounds)
     needs_gradient = (~in_bounds)
 
     # Apply distance-based gradient for pixels needing it
@@ -160,7 +160,8 @@ def main():
         jpeg_quality=85,
         log_interval=5.0,
         intrinsics_interval=2.0,
-        localhost_port=9090
+        localhost_port=9090,
+        extra_send_locations=[(192.168.0.21, 9095)]
     )
 
     # Initialise RealSense pipeline
